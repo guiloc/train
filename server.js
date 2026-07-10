@@ -219,6 +219,133 @@ app.get('/api/stats/progress', (req, res) => {
   );
 });
 
+// --- Plan de séance -----------------------------------------------------------
+// Séance du jour calculée automatiquement : rien à décider en arrivant.
+//  - Budget de séries pondérées = cible hebdo répartie sur sessions_per_week,
+//    plafonné par ce qui reste à faire dans la semaine.
+//  - Rotation : les exercices les moins récemment travaillés passent en premier.
+//  - Double progression : même charge en visant +1 rep, puis +2,5 kg et retour
+//    à 8 reps quand toutes les séries atteignent 12.
+const REP_MIN = 8;
+const REP_MAX = 12;
+const WEIGHT_INCREMENT = 2.5; // kg
+const MAX_SETS_PER_EXERCISE = 3;
+
+function buildPlan(date) {
+  const s = getSettings();
+  const min = +s.weekly_target_min || 12;
+  const max = +s.weekly_target_max || 15;
+  const freq = +s.sessions_per_week || 3;
+  const monday = isoWeekMonday(date);
+
+  const doneWeekBefore = db
+    .prepare(`
+      SELECT COALESCE(SUM(e.factor), 0) AS v
+      FROM sets st
+      JOIN sessions sess ON sess.id = st.session_id
+      JOIN exercises e ON e.id = st.exercise_id
+      WHERE sess.date >= ? AND sess.date < ?
+    `)
+    .get(monday, date).v;
+
+  const perSession = (min + max) / 2 / freq;
+  let budget = Math.min(perSession, max - doneWeekBefore);
+  const maintenance = budget < 1;
+  if (maintenance) budget = 1; // cible hebdo atteinte : séance courte pour garder la chaîne
+
+  // Progression basée sur la dernière séance STRICTEMENT avant `date`, pour que
+  // la proposition reste stable pendant toute la séance du jour.
+  const lastDateStmt = db.prepare(`
+    SELECT MAX(sess.date) AS d
+    FROM sets st JOIN sessions sess ON sess.id = st.session_id
+    WHERE st.exercise_id = ? AND sess.date < ?
+  `);
+  const lastSetsStmt = db.prepare(`
+    SELECT st.weight, st.reps
+    FROM sets st JOIN sessions sess ON sess.id = st.session_id
+    WHERE st.exercise_id = ? AND sess.date = ?
+    ORDER BY st.id
+  `);
+
+  const ordered = db
+    .prepare('SELECT * FROM exercises WHERE active = 1 ORDER BY id')
+    .all()
+    .map((e) => ({ ...e, lastDate: lastDateStmt.get(e.id, date).d }))
+    .sort((a, b) => {
+      const da = a.lastDate || '';
+      const db_ = b.lastDate || '';
+      return da < db_ ? -1 : da > db_ ? 1 : a.id - b.id;
+    });
+
+  const items = [];
+  let remaining = budget;
+  for (const ex of ordered) {
+    if (remaining <= 0.25) break;
+    const nSets = Math.max(1, Math.min(MAX_SETS_PER_EXERCISE, Math.round(remaining / ex.factor)));
+
+    let weight = 0;
+    let reps = 10;
+    let reason = 'Première fois : prends une charge tenable 8–12 reps propres.';
+    if (ex.lastDate) {
+      const lastSets = lastSetsStmt.all(ex.id, ex.lastDate);
+      const w = Math.max(...lastSets.map((x) => x.weight));
+      const atW = lastSets.filter((x) => x.weight === w);
+      const minReps = Math.min(...atW.map((x) => x.reps));
+      if (w > 0 && minReps >= REP_MAX && atW.length >= nSets) {
+        weight = w + WEIGHT_INCREMENT;
+        reps = REP_MIN;
+        reason = `${REP_MAX} reps atteintes sur toutes les séries → +${WEIGHT_INCREMENT} kg, retour à ${REP_MIN} reps.`;
+      } else {
+        weight = w;
+        reps = w > 0 ? Math.min(REP_MAX, minReps + 1) : minReps + 1;
+        reason = `Même charge, vise ${reps} reps (dernière fois : ${minReps} sur la série la plus faible).`;
+      }
+    }
+
+    items.push({
+      exercise_id: ex.id,
+      exercise: ex.name,
+      factor: ex.factor,
+      sets: nSets,
+      weight,
+      reps,
+      reason,
+    });
+    remaining -= nSets * ex.factor;
+  }
+
+  // Séries déjà validées aujourd'hui, imputées au plan exercice par exercice.
+  const doneByEx = {};
+  const todayRows = db
+    .prepare(`
+      SELECT st.exercise_id FROM sets st
+      JOIN sessions sess ON sess.id = st.session_id
+      WHERE sess.date = ?
+    `)
+    .all(date);
+  for (const r of todayRows) doneByEx[r.exercise_id] = (doneByEx[r.exercise_id] || 0) + 1;
+  for (const it of items) it.done_sets = Math.min(it.sets, doneByEx[it.exercise_id] || 0);
+
+  return {
+    date,
+    maintenance,
+    weekly: {
+      target_min: min,
+      target_max: max,
+      done_before_today: Math.round(doneWeekBefore * 10) / 10,
+    },
+    planned_volume: Math.round(items.reduce((a, it) => a + it.sets * it.factor, 0) * 10) / 10,
+    completed: items.length > 0 && items.every((it) => it.done_sets >= it.sets),
+    items,
+  };
+}
+
+app.get('/api/plan', (req, res) => {
+  const q = req.query.date || '';
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(q) ? q : new Date().toISOString().slice(0, 10);
+  res.json(buildPlan(date));
+});
+
 // --- Réglages ----------------------------------------------------------------
 app.get('/api/settings', (req, res) => res.json(getSettings()));
 
