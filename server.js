@@ -2,14 +2,27 @@
 
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const express = require('express');
 const Database = require('better-sqlite3');
 
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
+// Charge .env s'il existe (pratique en local). Sur Railway/prod, les vraies
+// variables d'environnement du service priment déjà sur le fichier.
+const envPath = path.join(__dirname, '.env');
+if (fs.existsSync(envPath)) {
+  for (const line of fs.readFileSync(envPath, 'utf8').split('\n')) {
+    const m = line.match(/^\s*([\w.-]+)\s*=\s*(.*?)\s*$/);
+    if (m && !(m[1] in process.env)) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
+  }
+}
+
 const PORT = process.env.PORT || 3000;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'tracker.db');
+const BASIC_AUTH_USER = process.env.BASIC_AUTH_USER;
+const BASIC_AUTH_PASS = process.env.BASIC_AUTH_PASS;
 
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 const db = new Database(DB_PATH);
@@ -100,6 +113,29 @@ function hasSetsOn(date) {
 // App
 // ---------------------------------------------------------------------------
 const app = express();
+
+// Auth basique optionnelle : activée seulement si les deux variables d'env
+// sont définies (voir README, section déploiement).
+if (BASIC_AUTH_USER && BASIC_AUTH_PASS) {
+  const timingSafeStrEqual = (a, b) => {
+    const bufA = Buffer.from(a);
+    const bufB = Buffer.from(b);
+    return bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB);
+  };
+  app.use((req, res, next) => {
+    const [scheme, encoded] = (req.headers.authorization || '').split(' ');
+    if (scheme === 'Basic' && encoded) {
+      const [user, pass] = Buffer.from(encoded, 'base64').toString().split(':');
+      if (timingSafeStrEqual(user || '', BASIC_AUTH_USER) && timingSafeStrEqual(pass || '', BASIC_AUTH_PASS)) {
+        return next();
+      }
+    }
+    res.set('WWW-Authenticate', 'Basic realm="Carnet Biceps"').status(401).send('Authentification requise');
+  });
+} else {
+  console.log('BasicAuth désactivée (définir BASIC_AUTH_USER et BASIC_AUTH_PASS pour l\'activer)');
+}
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 

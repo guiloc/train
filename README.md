@@ -35,7 +35,7 @@ La base est créée automatiquement dans `./data/tracker.db`.
    - Ajouter la variable d'environnement : `DB_PATH=/data/tracker.db`
 4. Redéployer. C'est tout.
 
-> L'application n'a **pas d'authentification**. Sur Railway l'URL est publique : soit ajouter un auth basique (middleware Express, 10 lignes), soit restreindre via un nom de domaine privé/proxy. À toi de voir selon l'usage.
+5. **Authentification basique (recommandé, l'URL Railway est publique)** : définir les variables d'environnement `BASIC_AUTH_USER` et `BASIC_AUTH_PASS`. Dès que les deux sont présentes, toute la page (statique + API) demande un login/mot de passe HTTP Basic. Sans ces variables, l'app reste ouverte comme avant.
 
 ## API
 
