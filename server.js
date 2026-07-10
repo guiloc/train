@@ -79,6 +79,23 @@ function getSettings() {
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
 
+function prevDay(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function hasSetsOn(date) {
+  const row = db
+    .prepare(`
+      SELECT COUNT(*) AS n FROM sets s
+      JOIN sessions sess ON sess.id = s.session_id
+      WHERE sess.date = ?
+    `)
+    .get(date);
+  return row.n > 0;
+}
+
 // ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
@@ -233,6 +250,12 @@ const WEIGHT_INCREMENT = 2.5; // kg
 const MAX_SETS_PER_EXERCISE = 3;
 
 function buildPlan(date) {
+  // Au moins un jour de pause entre deux séances : si la veille a été
+  // entraînée, ce jour est forcé au repos, rien à proposer.
+  if (hasSetsOn(prevDay(date))) {
+    return { date, rest: true, maintenance: false, planned_volume: 0, completed: false, items: [] };
+  }
+
   const s = getSettings();
   const min = +s.weekly_target_min || 12;
   const max = +s.weekly_target_max || 15;

@@ -15,5 +15,8 @@
     "express": "^4.21.0"
   },
   "license": "MIT",
-  "author": ""
+  "author": "",
+  "allowScripts": {
+    "better-sqlite3@11.10.0": true
+  }
 }

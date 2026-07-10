@@ -82,6 +82,12 @@
   .prog .vals { font-family: var(--mono); font-size: 13px; text-align: right; }
   .prog .vals b { color: var(--accent); }
 
+  .plan-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 12px; }
+  .plan-card-head h2 { margin-bottom: 0; }
+  .plan-back {
+    background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 6px;
+    padding: 5px 10px; font-family: var(--mono); font-size: 12px; cursor: pointer; white-space: nowrap;
+  }
   .plan-ex { padding: 10px 0; border-bottom: 1px solid var(--panel-2); }
   .plan-ex:last-child { border-bottom: none; }
   .plan-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
@@ -113,6 +119,28 @@
   }
   .plan-done-msg { font-family: var(--mono); font-size: 14px; color: var(--ok); padding: 8px 0; }
 
+  .week-cal { display: flex; gap: 6px; }
+  .week-day { flex: 1; text-align: center; padding: 8px 2px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line); }
+  .week-day .dow { font-family: var(--mono); font-size: 11px; color: var(--muted); text-transform: uppercase; }
+  .week-day .num { font-family: var(--display); font-size: 18px; margin: 2px 0; }
+  .week-day .mark { font-size: 13px; height: 16px; color: var(--muted); }
+  .week-day.today { border-color: var(--accent); }
+  .week-day.done { background: var(--ok); border-color: var(--ok); }
+  .week-day.done.today { box-shadow: 0 0 0 2px var(--accent) inset; }
+  .week-day.clickable { cursor: pointer; }
+  .week-day.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .week-day.selected { box-shadow: 0 0 0 2px var(--text) inset; }
+  .week-day.done.selected { box-shadow: 0 0 0 2px var(--text) inset, 0 0 0 4px var(--accent) inset; }
+  .week-day.done .dow, .week-day.done .num, .week-day.done .mark { color: #0B1520; }
+  .week-day.missed .mark { color: var(--danger); }
+  .week-day.repos { border-color: var(--ok); }
+  .week-day.repos .mark { color: var(--ok); }
+
+  .week-alert {
+    font-family: var(--mono); font-size: 13px; color: var(--danger); margin-top: 10px;
+    padding: 8px 10px; background: rgba(217, 106, 91, 0.12); border: 1px solid var(--danger); border-radius: 6px;
+  }
+
   .hint { font-size: 13px; color: var(--muted); margin-top: 10px; }
   .empty { color: var(--muted); font-family: var(--mono); font-size: 13px; padding: 12px 0; }
   .toast {
@@ -141,7 +169,16 @@
 
   <section id="seance" class="active">
     <div class="card">
-      <h2>Séance proposée — <span id="plan-label"></span></h2>
+      <h2>Cette semaine</h2>
+      <div class="week-cal" id="week-cal"></div>
+      <p class="week-alert" id="week-alert" hidden></p>
+      <p class="hint">Clique aujourd'hui ou un jour à venir pour voir ce qu'il contient.</p>
+    </div>
+    <div class="card">
+      <div class="plan-card-head">
+        <h2><span id="plan-kind">Séance proposée</span> — <span id="plan-label"></span></h2>
+        <button class="plan-back" id="plan-back" hidden>&larr; Aujourd'hui</button>
+      </div>
       <div id="plan"><p class="empty">Calcul de la séance…</p></div>
       <p class="hint" id="plan-note"></p>
     </div>
@@ -212,7 +249,33 @@
   const todayISO = () => new Date().toISOString().slice(0, 10);
   const fmtDate = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
 
+  // Lundi de la semaine ISO contenant la date donnée — même algo que server.js,
+  // pour que la frise s'aligne sur les semaines utilisées par /api/stats/weekly.
+  function isoWeekMonday(dateStr) {
+    const d = new Date(dateStr + 'T12:00:00Z');
+    const day = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() - day + 1);
+    return d.toISOString().slice(0, 10);
+  }
+  function weekDates(dateStr) {
+    const monday = isoWeekMonday(dateStr);
+    const out = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday + 'T12:00:00Z');
+      d.setUTCDate(d.getUTCDate() + i);
+      out.push(d.toISOString().slice(0, 10));
+    }
+    return out;
+  }
+  function prevISO(dateStr) {
+    const d = new Date(dateStr + 'T12:00:00Z');
+    d.setUTCDate(d.getUTCDate() - 1);
+    return d.toISOString().slice(0, 10);
+  }
+
   let sessionId = null;
+  let viewDate = null; // null = séance du jour (live) ; sinon date projetée (lecture seule)
+  let todayTrained = false; // au moins une série loguée aujourd'hui — pour le calcul de l'alerte hebdo
 
   document.querySelectorAll('nav button').forEach((b) => {
     b.addEventListener('click', () => {
@@ -248,14 +311,39 @@
     return sessionId;
   }
 
-  async function loadPlan() {
-    const plan = await api('/api/plan');
+  async function loadPlan(date) {
+    const isForecast = !!date;
+    const plan = await api(isForecast ? `/api/plan?date=${date}` : '/api/plan');
     const box = $('#plan');
     const note = $('#plan-note');
+
+    $('#plan-label').textContent = fmtDate(plan.date);
+    $('#plan-kind').textContent = isForecast ? 'Séance prévue' : 'Séance proposée';
+    $('#plan-back').hidden = !isForecast;
+
+    if (plan.rest) {
+      box.innerHTML = '<p class="empty">Jour de repos — au moins un jour de pause après une séance. Rien à faire ici ; la saisie manuelle reste ouverte si tu veux quand même logger une série.</p>';
+      note.textContent = '';
+      return;
+    }
 
     if (!plan.items.length) {
       box.innerHTML = '<p class="empty">Aucun exercice actif. Ajoute-en un dans Réglages.</p>';
       note.textContent = '';
+      return;
+    }
+
+    if (isForecast) {
+      // Lecture seule : pas de saisie possible pour une date future.
+      box.innerHTML = plan.items.map((it) => `
+        <div class="plan-ex">
+          <div class="plan-head">
+            <span class="name">${it.exercise}</span>
+            <span class="vals"><b>${it.weight ? it.weight + ' kg' : 'PDC'} × ${it.reps}</b> · ${it.sets} série${it.sets > 1 ? 's' : ''}</span>
+          </div>
+          <p class="plan-reason">${it.reason}</p>
+        </div>`).join('');
+      note.textContent = 'Aperçu de ce que serait la prochaine séance à cette date, en supposant qu\'aucune séance n\'a lieu avant. Reste identique tant que tu n\'as pas repris.';
       return;
     }
 
@@ -322,8 +410,60 @@
     }
   }
 
+  $('#plan-back').addEventListener('click', () => {
+    viewDate = null;
+    loadPlan();
+    highlightSelectedDay();
+  });
+
+  function highlightSelectedDay() {
+    const sel = viewDate || todayISO();
+    $('#week-cal').querySelectorAll('.week-day').forEach((el) => {
+      el.classList.toggle('selected', el.dataset.date === sel);
+    });
+  }
+
+  function renderWeekCal(sessions) {
+    const byDate = {};
+    for (const s of sessions) byDate[s.date] = s.sets.length;
+    const today = todayISO();
+    todayTrained = (byDate[today] || 0) > 0;
+    const dow = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+    $('#week-cal').innerHTML = weekDates(today).map((d, i) => {
+      const done = (byDate[d] || 0) > 0;
+      const isToday = d === today;
+      const isFuture = d > today;
+      const isRest = !done && (byDate[prevISO(d)] || 0) > 0; // pause obligatoire après une séance
+      const clickable = isToday || isFuture;
+      let cls = 'week-day';
+      if (done) cls += ' done';
+      else if (isRest) cls += ' repos';
+      else if (isFuture) cls += ' future';
+      else if (!isToday) cls += ' missed';
+      if (isToday) cls += ' today';
+      if (clickable) cls += ' clickable';
+      const mark = done ? '✓' : isRest ? '⏸' : isFuture ? '·' : isToday ? '' : '—';
+      return `<div class="${cls}" data-date="${d}">
+        <div class="dow">${dow[i]}</div>
+        <div class="num">${+d.slice(8, 10)}</div>
+        <div class="mark">${mark}</div>
+      </div>`;
+    }).join('');
+
+    $('#week-cal').querySelectorAll('.week-day.clickable').forEach((el) => {
+      el.addEventListener('click', () => {
+        const d = el.dataset.date;
+        viewDate = d === today ? null : d;
+        loadPlan(viewDate);
+        highlightSelectedDay();
+      });
+    });
+    highlightSelectedDay();
+  }
+
   async function loadSessions() {
     const sessions = await api('/api/sessions?limit=15');
+    renderWeekCal(sessions);
     const today = sessions.find((s) => s.date === todayISO());
     sessionId = today ? today.id : null;
 
@@ -409,7 +549,9 @@
     }
     svg += '</svg>';
     $('#chart').innerHTML = svg;
-    updateStreak(weeks, +settings.sessions_per_week || 3);
+    const freq = +settings.sessions_per_week || 3;
+    updateStreak(weeks, freq);
+    updateWeekAlert(weeks, freq);
   }
 
   function updateStreak(weeks, freq) {
@@ -424,6 +566,30 @@
     if (currentOk) streak++;
     $('#streak').innerHTML = `chaîne : <b>${streak}</b> sem.` +
       (current && !currentOk ? `<br>cette sem. : ${current.sessions}/${freq}` : '');
+  }
+
+  // Alerte si l'objectif hebdo devient mathématiquement inatteignable vu les
+  // jours restants de la semaine ISO en cours ET la règle d'un jour de repos
+  // obligatoire après chaque séance (pas plus d'une séance sur deux jours).
+  function updateWeekAlert(weeks, freq) {
+    const current = weeks[weeks.length - 1];
+    const box = $('#week-alert');
+    if (!current) { box.hidden = true; return; }
+    const today = todayISO();
+    const daysElapsed = Math.round((new Date(today + 'T12:00:00Z') - new Date(current.week + 'T12:00:00Z')) / 86400000);
+    const daysRemainingAfterToday = Math.max(0, 6 - daysElapsed);
+
+    let maxAdditional = 0;
+    let prevTrained = todayTrained;
+    for (let i = 0; i < daysRemainingAfterToday; i++) {
+      if (!prevTrained) { maxAdditional++; prevTrained = true; }
+      else prevTrained = false;
+    }
+
+    const maxPossible = current.sessions + maxAdditional;
+    if (maxPossible >= freq) { box.hidden = true; return; }
+    box.hidden = false;
+    box.textContent = `⚠ Objectif de ${freq} séances compromis cette semaine : ${current.sessions} faite${current.sessions > 1 ? 's' : ''}, au plus ${maxAdditional} de plus possible${maxAdditional > 1 ? 's' : ''} d'ici dimanche (repos obligatoire un jour sur deux).`;
   }
 
   async function loadProgress() {
@@ -456,7 +622,7 @@
     });
     toast('Réglages enregistrés ✓');
     loadWeekly();
-    loadPlan();
+    loadPlan(viewDate);
   });
   $('#add-ex').addEventListener('click', async () => {
     const name = $('#new-ex-name').value.trim();
@@ -470,15 +636,14 @@
     $('#new-ex-name').value = '';
     $('#new-ex-factor').value = '';
     toast('Exercice ajouté ✓');
-    loadExercises().then(loadPlan);
+    loadExercises().then(() => loadPlan(viewDate));
   });
 
-  function refresh() {
-    loadPlan();
-    loadSessions();
+  async function refresh() {
+    loadPlan(viewDate);
+    await loadSessions(); // fixe todayTrained avant le calcul de l'alerte hebdo
     loadWeekly();
   }
-  $('#plan-label').textContent = fmtDate(todayISO());
   loadExercises().then(refresh);
   loadSettings();
 })();
