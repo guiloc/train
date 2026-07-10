@@ -89,14 +89,28 @@
   .plan-head .vals { font-family: var(--mono); font-size: 13px; white-space: nowrap; }
   .plan-head .vals b { color: var(--accent); }
   .plan-reason { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 2px; }
-  .plan-sets { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-  .set-btn {
-    flex: 1; min-width: 72px; padding: 9px 6px; background: var(--panel-2); color: var(--text);
+  .plan-sets { margin-top: 8px; }
+  .set-row {
+    display: flex; align-items: center; gap: 8px; padding: 5px 0;
+    font-family: var(--mono); font-size: 13px;
+  }
+  .set-row .set-label { color: var(--muted); min-width: 64px; }
+  .set-ok {
+    padding: 8px 14px; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--accent); border-radius: 6px; cursor: pointer;
+    font-family: var(--mono); font-size: 14px; font-weight: 600; white-space: nowrap;
+  }
+  .set-ok:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .set-alt { width: 74px; padding: 8px; text-align: center; }
+  .set-alt-go {
+    padding: 8px 10px; background: transparent; color: var(--muted);
     border: 1px solid var(--line); border-radius: 6px; cursor: pointer;
     font-family: var(--mono); font-size: 13px;
   }
-  .set-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .set-btn.done { background: var(--ok); border-color: var(--ok); color: #0B1520; cursor: default; font-weight: 600; }
+  .set-done-chip {
+    padding: 8px 14px; background: var(--ok); color: #0B1520; border-radius: 6px;
+    font-weight: 600; white-space: nowrap;
+  }
   .plan-done-msg { font-family: var(--mono); font-size: 14px; color: var(--ok); padding: 8px 0; }
 
   .hint { font-size: 13px; color: var(--muted); margin-top: 10px; }
@@ -254,27 +268,45 @@
         <p class="plan-reason">${it.reason}</p>
         <div class="plan-sets">
           ${Array.from({ length: it.sets }, (_, i) => {
-            const done = i < it.done_sets;
-            return `<button class="set-btn${done ? ' done' : ''}" ${done ? 'disabled' : ''}
-                      data-ex="${it.exercise_id}" data-w="${it.weight}" data-r="${it.reps}"
-                      aria-label="${it.exercise}, série ${i + 1}">${done ? '✓' : 'Série ' + (i + 1)}</button>`;
+            const done = it.done_log[i];
+            if (done) {
+              return `<div class="set-row">
+                <span class="set-label">Série ${i + 1}</span>
+                <span class="set-done-chip">✓ ${done.reps} rep${done.reps > 1 ? 's' : ''}</span>
+              </div>`;
+            }
+            return `<div class="set-row" data-ex="${it.exercise_id}" data-w="${it.weight}">
+              <span class="set-label">Série ${i + 1}</span>
+              <button class="set-ok" data-r="${it.reps}" aria-label="${it.exercise}, série ${i + 1} : valider ${it.reps} reps">✓ ${it.reps} reps</button>
+              <input class="set-alt" type="number" min="1" step="1" inputmode="numeric" placeholder="autre" aria-label="${it.exercise}, série ${i + 1} : autre nombre de reps">
+              <button class="set-alt-go" aria-label="Valider ce nombre de reps">OK</button>
+            </div>`;
           }).join('')}
         </div>
       </div>`).join('') +
       (plan.completed ? '<p class="plan-done-msg">Séance terminée ✓ — à la prochaine.</p>' : '');
 
-    box.querySelectorAll('.set-btn:not(.done)').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        btn.disabled = true;
-        const id = await ensureSession();
-        await api(`/api/sessions/${id}/sets`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ exercise_id: +btn.dataset.ex, weight: +btn.dataset.w, reps: +btn.dataset.r }),
-        });
-        toast('Série validée ✓');
-        refresh();
+    async function logSet(row, reps) {
+      row.querySelectorAll('button, input').forEach((el) => (el.disabled = true));
+      const id = await ensureSession();
+      await api(`/api/sessions/${id}/sets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ exercise_id: +row.dataset.ex, weight: +row.dataset.w, reps }),
       });
+      toast('Série validée ✓');
+      refresh();
+    }
+    box.querySelectorAll('.set-row[data-ex]').forEach((row) => {
+      const alt = row.querySelector('.set-alt');
+      const logAlt = () => {
+        const v = Math.round(+alt.value);
+        if (!v || v < 1) return toast('Reps invalides');
+        logSet(row, v);
+      };
+      row.querySelector('.set-ok').addEventListener('click', () => logSet(row, +row.querySelector('.set-ok').dataset.r));
+      row.querySelector('.set-alt-go').addEventListener('click', logAlt);
+      alt.addEventListener('keydown', (e) => { if (e.key === 'Enter') logAlt(); });
     });
 
     note.textContent = plan.maintenance

@@ -3,7 +3,7 @@
 Tracker et planificateur d'entraînement biceps. Node.js/Express + SQLite (better-sqlite3), frontend vanilla.
 
 Principes intégrés :
-- **Séance auto-proposée** : en arrivant sur l'onglet Séance, le plan du jour est déjà calculé — exercices, charge, reps et nombre de séries — il n'y a qu'à cocher. Rotation des exercices les moins récemment travaillés, double progression (même charge en visant +1 rep, puis +2,5 kg et retour à 8 reps quand toutes les séries atteignent 12), volume plafonné par la cible hebdo. Cible atteinte → séance courte d'entretien pour garder la chaîne.
+- **Séance auto-proposée** : en arrivant sur l'onglet Séance, le plan du jour est déjà calculé — exercices, charge, reps et nombre de séries — il n'y a qu'à cocher : chaque série affiche son objectif de reps (✓ = réussi tel quel, case « autre » sinon). Première séance : 7 reps, lest à zéro. Rotation des exercices les moins récemment travaillés, double progression (même charge en visant +1 rep, puis +2,5 kg et retour à 8 reps quand toutes les séries atteignent 12), volume plafonné par la cible hebdo. Cible atteinte → séance courte d'entretien pour garder la chaîne.
 - **Volume hebdo pondéré** avec zone cible 12–15 séries (rowing compte 0,5)
 - **Chaîne de régularité** (habit tracking façon *Atomic Habits*) : 3 séances/semaine
 - **Progression visible** : record et dernière perf par exercice
