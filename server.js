@@ -228,6 +228,7 @@ app.get('/api/stats/progress', (req, res) => {
 //    à 8 reps quand toutes les séries atteignent 12.
 const REP_MIN = 8;
 const REP_MAX = 12;
+const FIRST_TIME_REPS = 7; // première séance : court et propre, lest/charge à zéro
 const WEIGHT_INCREMENT = 2.5; // kg
 const MAX_SETS_PER_EXERCISE = 3;
 
@@ -284,8 +285,8 @@ function buildPlan(date) {
     const nSets = Math.max(1, Math.min(MAX_SETS_PER_EXERCISE, Math.round(remaining / ex.factor)));
 
     let weight = 0;
-    let reps = 10;
-    let reason = 'Première fois : prends une charge tenable 8–12 reps propres.';
+    let reps = FIRST_TIME_REPS;
+    let reason = `Première fois : lest/charge à zéro, ${FIRST_TIME_REPS} reps propres.`;
     if (ex.lastDate) {
       const lastSets = lastSetsStmt.all(ex.id, ex.lastDate);
       const w = Math.max(...lastSets.map((x) => x.weight));
@@ -318,13 +319,19 @@ function buildPlan(date) {
   const doneByEx = {};
   const todayRows = db
     .prepare(`
-      SELECT st.exercise_id FROM sets st
+      SELECT st.exercise_id, st.weight, st.reps FROM sets st
       JOIN sessions sess ON sess.id = st.session_id
-      WHERE sess.date = ?
+      WHERE sess.date = ? ORDER BY st.id
     `)
     .all(date);
-  for (const r of todayRows) doneByEx[r.exercise_id] = (doneByEx[r.exercise_id] || 0) + 1;
-  for (const it of items) it.done_sets = Math.min(it.sets, doneByEx[it.exercise_id] || 0);
+  for (const r of todayRows) {
+    (doneByEx[r.exercise_id] = doneByEx[r.exercise_id] || []).push({ weight: r.weight, reps: r.reps });
+  }
+  for (const it of items) {
+    const log = doneByEx[it.exercise_id] || [];
+    it.done_log = log.slice(0, it.sets); // reps réellement faites, pour l'affichage
+    it.done_sets = it.done_log.length;
+  }
 
   return {
     date,
