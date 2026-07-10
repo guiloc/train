@@ -1,0 +1,19 @@
+{
+  "name": "biceps-tracker",
+  "version": "1.0.0",
+  "description": "Tracker et planificateur d'entraînement biceps — volume hebdo, progression, régularité",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.5.0",
+    "express": "^4.21.0"
+  },
+  "license": "MIT",
+  "author": ""
+}
