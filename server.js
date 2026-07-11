@@ -193,14 +193,22 @@ app.post('/api/sessions/:id/sets', (req, res) => {
     return res.status(400).json({ error: 'exercise_id et reps > 0 requis' });
   }
   const w = Number.isFinite(+weight) ? +weight : 0;
+  const r = Math.round(+reps);
+
+  // Record perso : comparé au meilleur existant AVANT cette série (charge, puis reps à charge égale).
+  const bestBefore = db
+    .prepare('SELECT weight, reps FROM sets WHERE exercise_id = ? ORDER BY weight DESC, reps DESC LIMIT 1')
+    .get(+exercise_id);
+  const isPr = !!bestBefore && (w > bestBefore.weight || (w === bestBefore.weight && r > bestBefore.reps));
+
   const info = db
     .prepare('INSERT INTO sets (session_id, exercise_id, weight, reps) VALUES (?, ?, ?, ?)')
-    .run(session.id, +exercise_id, w, Math.round(+reps));
+    .run(session.id, +exercise_id, w, r);
   const row = db
     .prepare(`SELECT s.id, s.exercise_id, e.name AS exercise, e.factor, s.weight, s.reps
               FROM sets s JOIN exercises e ON e.id = s.exercise_id WHERE s.id = ?`)
     .get(info.lastInsertRowid);
-  res.status(201).json(row);
+  res.status(201).json({ ...row, is_pr: isPr });
 });
 
 app.delete('/api/sets/:id', (req, res) => {
@@ -270,6 +278,62 @@ app.get('/api/stats/progress', (req, res) => {
       last: lastStmt.get(e.id) || null,
     }))
   );
+});
+
+// Chaîne de jours + compteurs d'identité, pour le habit-tracking côté front.
+// Un jour de repos obligatoire (lendemain d'une séance) ne casse pas la chaîne :
+// seul un jour vraiment sauté (ni entraîné, ni repos imposé) la casse. Reflète
+// la règle "ne rate pas deux fois" plutôt qu'une quête de séries parfaites.
+app.get('/api/stats/streak', (req, res) => {
+  const trainedDates = db
+    .prepare(`
+      SELECT DISTINCT sess.date FROM sessions sess
+      JOIN sets s ON s.session_id = sess.id
+    `)
+    .all()
+    .map((r) => r.date)
+    .sort();
+  const trainedSet = new Set(trainedDates);
+  const today = new Date().toISOString().slice(0, 10);
+
+  function streakEndingAt(startDate) {
+    let d = startDate;
+    let count = 0;
+    while (true) {
+      if (trainedSet.has(d)) {
+        count++;
+        d = prevDay(d);
+        continue;
+      }
+      if (trainedSet.has(prevDay(d))) {
+        d = prevDay(d); // jour de repos obligatoire : ne casse pas, ne compte pas
+        continue;
+      }
+      break;
+    }
+    return count;
+  }
+
+  const days = trainedSet.has(today) ? streakEndingAt(today) : streakEndingAt(prevDay(today));
+
+  const firstDate = trainedDates[0] || null;
+  const daysSinceFirst = firstDate
+    ? Math.floor((new Date(today + 'T12:00:00Z') - new Date(firstDate + 'T12:00:00Z')) / 86400000) + 1
+    : 0;
+
+  // Hier raté : ni entraîné, ni jour de repos légitime (= avant-hier pas entraîné non plus).
+  const y = prevDay(today);
+  const yBefore = prevDay(y);
+  const missedYesterday =
+    !trainedSet.has(today) && !trainedSet.has(y) && !trainedSet.has(yBefore) && !!firstDate && y >= firstDate;
+
+  res.json({
+    days,
+    total_sessions: trainedDates.length,
+    first_date: firstDate,
+    days_since_first: daysSinceFirst,
+    missed_yesterday: missedYesterday,
+  });
 });
 
 // --- Plan de séance -----------------------------------------------------------
