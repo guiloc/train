@@ -38,6 +38,14 @@
   h1 span { color: var(--accent); }
   .streak { font-family: var(--mono); font-size: 13px; color: var(--muted); text-align: right; }
   .streak b { color: var(--accent); font-size: 21px; }
+  .streak .flame { font-size: 18px; filter: grayscale(1); opacity: .45; vertical-align: -2px; }
+  .streak.lit .flame { filter: none; opacity: 1; }
+  .streak-sub { font-size: 11px; color: var(--muted); }
+  .identity-line {
+    font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: center;
+    padding: 6px 0 2px;
+  }
+  .identity-line b { color: var(--info); }
 
   nav { display: flex; gap: 4px; margin: 16px 0; }
   nav button {
@@ -69,6 +77,7 @@
   }
   .btn:active { transform: translateY(1px); }
   .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+  #ics-btn { margin-top: 10px; }
 
   table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 13px; }
   th { text-align: left; color: var(--muted); font-weight: 400; padding: 4px 6px; border-bottom: 1px solid var(--line); }
@@ -85,7 +94,7 @@
   .prog .vals { font-family: var(--mono); font-size: 13px; text-align: right; }
   .prog .vals b { color: var(--accent); }
 
-  .plan-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 12px; }
+  .plan-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; }
   .plan-card-head h2 { margin-bottom: 0; }
   .plan-back {
     background: transparent; color: var(--info); border: 1px solid var(--info); border-radius: 6px;
@@ -155,6 +164,39 @@
   }
   .week-alert b { color: var(--accent); }
 
+  .missed-banner {
+    font-family: var(--mono); font-size: 13px; color: var(--text); margin-bottom: 12px;
+    padding: 10px 12px; background: rgba(95, 168, 216, 0.1); border: 1px solid rgba(95, 168, 216, 0.4); border-radius: 8px;
+  }
+  .missed-banner b { color: var(--info); }
+
+  .btn-quick {
+    background: transparent; color: var(--accent); border: 1px dashed var(--accent);
+    margin-top: 4px; margin-bottom: 4px;
+  }
+  .btn-quick:active { transform: translateY(1px); }
+
+  .plan-ring { flex-shrink: 0; }
+  .plan-ring circle#plan-ring-fg { transition: stroke-dashoffset .4s ease; }
+
+  .heatmap-grid { display: grid; grid-template-columns: repeat(auto-fill, 11px); gap: 3px; }
+  .hm-cell { width: 11px; height: 11px; border-radius: 2px; background: var(--panel-2); border: 1px solid var(--line); }
+  .hm-cell.done { background: var(--ok); border-color: var(--ok); }
+  .hm-cell.repos { background: transparent; border-color: var(--ok); }
+  .hm-cell.missed { background: rgba(217, 106, 91, .3); border-color: rgba(217, 106, 91, .45); }
+  .hm-cell.pre { opacity: .3; }
+  .hm-cell.today { outline: 1px solid var(--info); outline-offset: 1px; }
+
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; }
+  .badge {
+    flex: 1 1 78px; text-align: center; padding: 10px 6px; border-radius: 8px;
+    background: var(--panel-2); border: 1px solid var(--line); opacity: .4;
+  }
+  .badge.reached { opacity: 1; border-color: var(--accent); background: rgba(240, 178, 60, .1); }
+  .badge-num { display: block; font-family: var(--display); font-size: 22px; font-weight: 700; color: var(--muted); }
+  .badge.reached .badge-num { color: var(--accent); }
+  .badge-label { font-family: var(--mono); font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+
   .hint { font-size: 13px; color: var(--muted); margin-top: 10px; }
   .empty { color: var(--muted); font-family: var(--mono); font-size: 13px; padding: 12px 0; }
   .toast {
@@ -164,15 +206,32 @@
     opacity: 0; transition: opacity .25s; pointer-events: none;
   }
   .toast.show { opacity: 1; }
-  @media (prefers-reduced-motion: reduce) { .toast { transition: none; } .btn:active { transform: none; } }
+  .toast.toast-pr {
+    border-color: var(--ok); color: var(--ok); font-weight: 600; font-size: 15px;
+    animation: pr-pop .4s ease;
+  }
+  @keyframes pr-pop {
+    0% { transform: translateX(-50%) scale(.85); }
+    60% { transform: translateX(-50%) scale(1.08); }
+    100% { transform: translateX(-50%) scale(1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .toast { transition: none; }
+    .toast.toast-pr { animation: none; }
+    .btn:active { transform: none; }
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <h1>Carnet <span>Biceps</span></h1>
-    <div class="streak" id="streak">chaîne : <b>—</b></div>
+    <div class="streak" id="streak" aria-live="polite">
+      <span class="flame" id="streak-flame">🔥</span><b id="streak-days">—</b>
+      <div class="streak-sub" id="streak-sub"></div>
+    </div>
   </header>
+  <p class="identity-line" id="identity-line" hidden></p>
 
   <nav>
     <button data-tab="seance" class="active">Séance</button>
@@ -182,12 +241,21 @@
   </nav>
 
   <section id="seance" class="active">
+    <p class="missed-banner" id="missed-banner" hidden></p>
     <div class="card">
       <div class="plan-card-head">
         <h2><span id="plan-kind">Séance proposée</span> — <span id="plan-label"></span></h2>
+        <div class="plan-ring" id="plan-ring" hidden>
+          <svg viewBox="0 0 44 44" width="40" height="40" aria-hidden="true">
+            <circle cx="22" cy="22" r="18" fill="none" stroke="var(--panel-2)" stroke-width="5"/>
+            <circle id="plan-ring-fg" cx="22" cy="22" r="18" fill="none" stroke="var(--accent)" stroke-width="5"
+                    stroke-linecap="round" stroke-dasharray="113" stroke-dashoffset="113" transform="rotate(-90 22 22)"/>
+          </svg>
+        </div>
         <button class="plan-back" id="plan-back" hidden>&larr; Aujourd'hui</button>
       </div>
       <div id="plan"><p class="empty">Calcul de la séance…</p></div>
+      <button class="btn btn-quick" id="quick-log-btn" hidden>⚡ Juste une série (2 min)</button>
       <p class="hint" id="plan-note"></p>
       <p class="hint">Règle des 2 minutes : une seule série validée suffit à maintenir la chaîne.</p>
     </div>
@@ -196,6 +264,7 @@
       <div class="week-cal" id="week-cal"></div>
       <p class="week-alert" id="week-alert" hidden></p>
       <p class="hint">Clique aujourd'hui ou un jour à venir pour voir ce qu'il contient.</p>
+      <button class="btn btn-ghost" id="ics-btn">📅 Rappel pour la prochaine séance</button>
     </div>
     <div class="card">
       <h2>Séries du jour</h2>
@@ -230,6 +299,15 @@
   </section>
 
   <section id="progression">
+    <div class="card">
+      <h2>Régularité</h2>
+      <div id="heatmap"></div>
+      <p class="gauge-note"><i>Plein</i> : séance. Contour : repos imposé. Point terne : manqué.</p>
+    </div>
+    <div class="card">
+      <h2>Badges</h2>
+      <div id="badges" class="badges"></div>
+    </div>
     <div class="card">
       <h2>Records &amp; dernières séries</h2>
       <div id="progress"></div>
@@ -289,10 +367,41 @@
     d.setUTCDate(d.getUTCDate() - 1);
     return d.toISOString().slice(0, 10);
   }
+  function nextISO(dateStr) {
+    const d = new Date(dateStr + 'T12:00:00Z');
+    d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().slice(0, 10);
+  }
 
   let sessionId = null;
   let viewDate = null; // null = séance du jour (live) ; sinon date projetée (lecture seule)
   let todayTrained = false; // au moins une série loguée aujourd'hui — pour le calcul de l'alerte hebdo
+  let currentLivePlan = null; // dernier plan du jour (non prévisionnel) chargé, pour le mode 2 minutes
+
+  // Messages de validation, tirés au sort : la variété rend la petite
+  // récompense plus saillante qu'un même message répété à chaque série.
+  const AFFIRMATIONS = [
+    'Série validée ✓',
+    'Ça compte ✓',
+    'Présent aujourd\'hui ✓',
+    'Encore une. Tu es quelqu\'un qui s\'entraîne.',
+    'Fait, point.',
+    'La chaîne continue.',
+  ];
+  function randomAffirmation() {
+    return AFFIRMATIONS[Math.floor(Math.random() * AFFIRMATIONS.length)];
+  }
+
+  // Après un log de série : célèbre un record perso s'il y en a un, sinon
+  // message de validation varié. Rafraîchit toujours l'état ensuite.
+  function celebrateSet(res) {
+    if (res && res.is_pr) {
+      toast('🏆 Nouveau record perso !', { pr: true, duration: 2600 });
+    } else {
+      toast(randomAffirmation());
+    }
+    refresh();
+  }
 
   document.querySelectorAll('nav button').forEach((b) => {
     b.addEventListener('click', () => {
@@ -301,15 +410,16 @@
       b.classList.add('active');
       $('#' + b.dataset.tab).classList.add('active');
       if (b.dataset.tab === 'volume') loadWeekly();
-      if (b.dataset.tab === 'progression') loadProgress();
+      if (b.dataset.tab === 'progression') { loadProgress(); loadHeatmap(); loadBadges(); }
     });
   });
 
-  function toast(msg) {
+  function toast(msg, opts) {
     const t = $('#toast');
     t.textContent = msg;
+    t.classList.toggle('toast-pr', !!(opts && opts.pr));
     t.classList.add('show');
-    setTimeout(() => t.classList.remove('show'), 1800);
+    setTimeout(() => t.classList.remove('show'), (opts && opts.duration) || 1800);
   }
 
   async function loadExercises() {
@@ -333,6 +443,8 @@
     const plan = await api(isForecast ? `/api/plan?date=${date}` : '/api/plan');
     const box = $('#plan');
     const note = $('#plan-note');
+    const ring = $('#plan-ring');
+    const quickBtn = $('#quick-log-btn');
 
     $('#plan-label').textContent = fmtDate(plan.date);
     $('#plan-kind').textContent = isForecast ? 'Séance prévue' : 'Séance proposée';
@@ -341,12 +453,18 @@
     if (plan.rest) {
       box.innerHTML = '<p class="empty">Jour de repos — au moins un jour de pause après une séance. Rien à faire ici ; "Série hors plan" plus bas reste ouvert si tu veux quand même logger une série.</p>';
       note.textContent = '';
+      ring.hidden = true;
+      quickBtn.hidden = true;
+      currentLivePlan = null;
       return;
     }
 
     if (!plan.items.length) {
       box.innerHTML = '<p class="empty">Aucun exercice actif. Ajoute-en un dans Réglages.</p>';
       note.textContent = '';
+      ring.hidden = true;
+      quickBtn.hidden = true;
+      currentLivePlan = null;
       return;
     }
 
@@ -361,6 +479,9 @@
           <p class="plan-reason">${it.reason}</p>
         </div>`).join('');
       note.textContent = 'Aperçu de ce que serait la prochaine séance à cette date, en supposant qu\'aucune séance n\'a lieu avant. Reste identique tant que tu n\'as pas repris.';
+      ring.hidden = true;
+      quickBtn.hidden = true;
+      currentLivePlan = null;
       return;
     }
 
@@ -394,13 +515,12 @@
     async function logSet(row, reps) {
       row.querySelectorAll('button, input').forEach((el) => (el.disabled = true));
       const id = await ensureSession();
-      await api(`/api/sessions/${id}/sets`, {
+      const res = await api(`/api/sessions/${id}/sets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ exercise_id: +row.dataset.ex, weight: +row.dataset.w, reps }),
       });
-      toast('Série validée ✓');
-      refresh();
+      celebrateSet(res);
     }
     box.querySelectorAll('.set-row[data-ex]').forEach((row) => {
       const alt = row.querySelector('.set-alt');
@@ -425,12 +545,100 @@
       $('#weight').value = next.weight || '';
       $('#reps').placeholder = `Reps (objectif ${next.reps})`;
     }
+
+    currentLivePlan = plan;
+    updatePlanRing(plan);
+    quickBtn.hidden = !next || plan.completed;
+  }
+
+  // Anneau de progression : part de la cible hebdo (minimum) déjà réalisée,
+  // séries d'aujourd'hui incluses. Vire au vert une fois la cible atteinte.
+  function updatePlanRing(plan) {
+    const ring = $('#plan-ring');
+    const fg = $('#plan-ring-fg');
+    if (!plan.weekly) { ring.hidden = true; return; }
+    const doneToday = plan.items.reduce((a, it) => a + it.done_sets * it.factor, 0);
+    const doneWeek = plan.weekly.done_before_today + doneToday;
+    const pct = Math.max(0, Math.min(1, doneWeek / plan.weekly.target_min));
+    const circumference = 113.097;
+    fg.style.stroke = pct >= 1 ? 'var(--ok)' : 'var(--accent)';
+    fg.style.strokeDashoffset = String(circumference * (1 - pct));
+    ring.hidden = false;
+    ring.setAttribute('aria-label', `${Math.round(pct * 100)}% de la cible hebdo atteinte`);
+  }
+
+  // Mode 2 minutes : logue directement une série de l'exercice prioritaire du
+  // plan du jour, sans passer par le formulaire. Le point n'est pas la
+  // performance mais de ne jamais laisser la friction faire sauter un jour.
+  $('#quick-log-btn').addEventListener('click', async () => {
+    if (!currentLivePlan) return;
+    const next = currentLivePlan.items.find((it) => it.done_sets < it.sets);
+    if (!next) return;
+    const btn = $('#quick-log-btn');
+    btn.disabled = true;
+    const id = await ensureSession();
+    const res = await api(`/api/sessions/${id}/sets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ exercise_id: next.exercise_id, weight: next.weight, reps: next.reps }),
+    });
+    btn.disabled = false;
+    celebrateSet(res);
+  });
+
+  // Bannière "ne rate pas deux fois" : hier n'était ni entraîné ni un jour de
+  // repos imposé. Ton neutre, pas de culpabilisation — juste le rappel que
+  // l'important est de ne pas enchaîner un deuxième jour manqué.
+  function renderMissedYesterdayBanner(missed) {
+    const box = $('#missed-banner');
+    if (!missed) { box.hidden = true; return; }
+    box.hidden = false;
+    box.innerHTML = 'Pas de séance hier (et ce n\'était pas un jour de repos prévu). Ça arrive. <b>Une seule série aujourd\'hui suffit</b> à ne pas rater deux fois de suite.';
   }
 
   $('#plan-back').addEventListener('click', () => {
     viewDate = null;
     loadPlan();
     highlightSelectedDay();
+  });
+
+  // Rappel .ics : aide à fixer une "implementation intention" (quand exactement
+  // je m'entraîne) plutôt que de compter sur la seule motivation du moment.
+  function icsForDate(dateStr) {
+    const stamp = dateStr.replace(/-/g, '');
+    const lines = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Carnet Biceps//FR',
+      'BEGIN:VEVENT',
+      `UID:biceps-${stamp}@carnet-biceps`,
+      `DTSTAMP:${stamp}T000000Z`,
+      `DTSTART:${stamp}T180000`,
+      `DTEND:${stamp}T183000`,
+      'SUMMARY:Séance biceps',
+      'DESCRIPTION:Une seule série validée suffit à maintenir la chaîne.',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ];
+    return lines.join('\r\n');
+  }
+
+  $('#ics-btn').addEventListener('click', async () => {
+    const today = todayISO();
+    const planToday = await api('/api/plan');
+    let target = today;
+    if (planToday.rest) target = nextISO(today);
+    else if (planToday.completed) target = nextISO(nextISO(today));
+    const blob = new Blob([icsForDate(target)], { type: 'text/calendar' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `seance-${target}.ics`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast('Rappel téléchargé — ouvre-le pour l\'ajouter à ton calendrier.');
   });
 
   function highlightSelectedDay() {
@@ -525,7 +733,7 @@
     const reps = +$('#reps').value;
     if (!reps || reps < 1) return toast('Reps manquantes');
     const id = await ensureSession();
-    await api(`/api/sessions/${id}/sets`, {
+    const res = await api(`/api/sessions/${id}/sets`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -535,8 +743,7 @@
       }),
     });
     $('#reps').value = '';
-    toast('Série enregistrée ✓');
-    refresh();
+    celebrateSet(res);
   });
 
   async function loadWeekly() {
@@ -567,22 +774,34 @@
     svg += '</svg>';
     $('#chart').innerHTML = svg;
     const freq = +settings.sessions_per_week || 3;
-    updateStreak(weeks, freq);
+    updateWeekSub(weeks, freq);
     updateWeekAlert(weeks, freq);
   }
 
-  function updateStreak(weeks, freq) {
-    let streak = 0;
-    const arr = [...weeks];
-    const current = arr.pop();
-    for (let i = arr.length - 1; i >= 0; i--) {
-      if (arr[i].sessions >= freq) streak++;
-      else break;
+  // Sous-texte du header : où on en est cette semaine par rapport à la cible.
+  // La chaîne principale (jours) vient de loadStreak(), pas de ce calcul hebdo.
+  function updateWeekSub(weeks, freq) {
+    const current = weeks[weeks.length - 1];
+    if (!current) return;
+    $('#streak-sub').textContent = `sem. ${current.sessions}/${freq}`;
+  }
+
+  async function loadStreak() {
+    const st = await api('/api/stats/streak');
+    $('#streak-days').textContent = st.days;
+    $('#streak').classList.toggle('lit', st.days > 0);
+    $('#streak-flame').setAttribute('aria-label', st.days > 0 ? `chaîne de ${st.days} jours` : 'pas de chaîne en cours');
+
+    const idLine = $('#identity-line');
+    if (st.total_sessions > 0) {
+      idLine.hidden = false;
+      idLine.innerHTML = `Tu t'entraînes depuis <b>${st.days_since_first}</b> jour${st.days_since_first > 1 ? 's' : ''} · <b>${st.total_sessions}</b> séance${st.total_sessions > 1 ? 's' : ''} au compteur.`;
+    } else {
+      idLine.hidden = true;
     }
-    const currentOk = current && current.sessions >= freq;
-    if (currentOk) streak++;
-    $('#streak').innerHTML = `chaîne : <b>${streak}</b> sem.` +
-      (current && !currentOk ? `<br>cette sem. : ${current.sessions}/${freq}` : '');
+
+    renderMissedYesterdayBanner(st.missed_yesterday);
+    checkMilestone(st.total_sessions);
   }
 
   // Alerte si l'objectif hebdo devient mathématiquement inatteignable vu les
@@ -619,6 +838,68 @@
           ${r.last ? `dernier ${r.last.weight || 'PDC'} × ${r.last.reps} (${fmtDate(r.last.date)})` : ''}
         </span>
       </div>`).join('') || '<p class="empty">Enregistre des séries pour voir ta progression.</p>';
+  }
+
+  // Heatmap façon "contributions" : ~18 semaines, lecture seule, pour rendre
+  // la régularité visible d'un coup d'œil plutôt que de la reconstruire tête.
+  async function loadHeatmap() {
+    const span = 126;
+    const [sessions, streak] = await Promise.all([
+      api(`/api/sessions?limit=${span + 5}`),
+      api('/api/stats/streak'),
+    ]);
+    const byDate = {};
+    for (const s of sessions) byDate[s.date] = s.sets.length;
+    const today = todayISO();
+    const firstDate = streak.first_date;
+    const cells = [];
+    for (let i = span - 1; i >= 0; i--) {
+      const d = new Date(today + 'T12:00:00Z');
+      d.setUTCDate(d.getUTCDate() - i);
+      cells.push(d.toISOString().slice(0, 10));
+    }
+    $('#heatmap').innerHTML = '<div class="heatmap-grid">' + cells.map((d) => {
+      const trained = (byDate[d] || 0) > 0;
+      const isRest = !trained && (byDate[prevISO(d)] || 0) > 0;
+      const isPre = !firstDate || d < firstDate;
+      let cls = 'hm-cell';
+      if (trained) cls += ' done';
+      else if (isRest) cls += ' repos';
+      else if (isPre) cls += ' pre';
+      else cls += ' missed';
+      if (d === today) cls += ' today';
+      return `<span class="${cls}" title="${fmtDate(d)}"></span>`;
+    }).join('') + '</div>';
+  }
+
+  const MILESTONES = [7, 14, 30, 50, 100, 200, 365];
+
+  async function loadBadges() {
+    const st = await api('/api/stats/streak');
+    $('#badges').innerHTML = MILESTONES.map((m) => {
+      const reached = st.total_sessions >= m;
+      return `<div class="badge ${reached ? 'reached' : ''}">
+        <span class="badge-num">${m}</span>
+        <span class="badge-label">séance${m > 1 ? 's' : ''}</span>
+      </div>`;
+    }).join('');
+  }
+
+  // Toast dédié la première fois qu'un jalon est franchi. Le compteur en
+  // localStorage évite de célébrer rétroactivement des jalons déjà atteints
+  // avant l'arrivée de cette fonctionnalité.
+  function checkMilestone(total) {
+    const key = 'biceps_last_seen_total';
+    const raw = localStorage.getItem(key);
+    if (raw === null) { localStorage.setItem(key, String(total)); return; }
+    const last = +raw;
+    if (total > last) {
+      const crossed = MILESTONES.filter((m) => m > last && m <= total);
+      if (crossed.length) {
+        toast(`🏅 Jalon franchi : ${crossed[crossed.length - 1]} séances !`, { pr: true, duration: 2600 });
+      }
+    }
+    if (total !== last) localStorage.setItem(key, String(total));
   }
 
   async function loadSettings() {
@@ -660,6 +941,7 @@
     loadPlan(viewDate);
     await loadSessions(); // fixe todayTrained avant le calcul de l'alerte hebdo
     loadWeekly();
+    loadStreak();
   }
   loadExercises().then(refresh);
   loadSettings();
